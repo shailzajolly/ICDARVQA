@@ -1,0 +1,12 @@
+#!/bin/bash
+
+python main.py --mode "train" \
+               --hidden-size 512 \
+               --batch-size 512 \
+               --vbatch-size 512 \
+               --val-split 0.1 \
+               --epoch 160 \
+               --data-root data/ \
+               --save log/ \
+               --log-freq 11 \
+
