@@ -2,7 +2,7 @@
 
 python main.py --mode "train" \
                --hidden-size 512 \
-               --batch-size 512 \
+               --batch-size 256 \
                --vbatch-size 512 \
                --val-split 0.1 \
                --epoch 160 \

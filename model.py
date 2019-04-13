@@ -31,13 +31,18 @@ class QuestionEncoder(nn.Module):
         self.embeddings.weight.data.copy_(torch.from_numpy(pretrained_wemb))
 
         self.encoder = nn.GRU(embed_dim, gru_hidden_size)
+        self.enc_mlp = nn.Linear(3*gru_hidden_size, gru_hidden_size)
         self.do = nn.Dropout(p=0.2)
 
     def forward(self, data):
         data = self.embeddings(data)
         self.encoder.flatten_parameters()
         outputs, hidden = self.encoder(data.permute(1,0,2))
-        ques_enc = self.do(outputs[-1])
+        max_pool_out = F.adaptive_max_pool1d(outputs.permute(1,2,0), 1).squeeze()
+        avg_pool_out = F.adaptive_avg_pool1d(outputs.permute(1,2,0), 1).squeeze()
+        cat_out = torch.cat((outputs[-1], max_pool_out, avg_pool_out), dim=1)
+        cat_out = self.enc_mlp(cat_out)
+        ques_enc = self.do(cat_out)
 
         return ques_enc
 

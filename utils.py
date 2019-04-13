@@ -57,7 +57,10 @@ class GOATLogger:
     def batch_info_eval(self, epoch, step, batches, loss=0, score=0):
         if step == -1:
             score_mean = np.mean(self.stats['eval']['score'][-batches:])
+            loss_mean = np.mean(self.stats['eval']['loss'][-batches:])
             strout = "[{:3d}]* Evaluation - score: {:.3f} *".format(epoch+1, score_mean)
+            self.loginfo(strout)
+            strout = "[{:3d}]* Evaluation - loss: {:.3f} *".format(epoch+1, loss_mean)
             self.loginfo(strout)
             self.save_stats('eval')
             return score_mean
