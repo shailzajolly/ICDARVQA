@@ -11,10 +11,12 @@ from torch.utils.data import Dataset, SubsetRandomSampler
 import numpy as np
 from tqdm import tqdm
 
+from constants import *
+
 
 class VqaDataset(Dataset):
 
-    def __init__(self, root, seqlen=14):
+    def __init__(self, root, ques_len=14, ans_len=7):
         """
         root (str): path to data directory
         seqlen (int): maximum words in a question
@@ -28,26 +30,35 @@ class VqaDataset(Dataset):
         print("Setting up everything...")
         self.vqas = []
         for qa in tqdm(qas):
-            que = np.ones(seqlen, dtype=np.int64) * len(word2idx)
+
+            que = []
             for i, word in enumerate(qa['question_toked']):
-                if i == seqlen:
+                if i == ques_len:
                     break
                 if word in word2idx:
-                    que[i] = word2idx[word]
+                    que.append(word2idx[word])
+                else:
+                    que.append(word2idx['UNK'])
 
-            ans = np.ones((101,2), dtype=np.int64) * len(ans2idx)
-            for i, word in enumerate([qa['answer']] + qa['distractors']):
-                for j, w in enumerate(word.split()):
-                    if j == 2:
-                        break
-                    if w in ans2idx:
-                        ans[i, j] = ans2idx[w]
+            mca = [PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN]
+            for i, word in enumerate(qa['dictionary']):
+                if word in ans2idx:
+                    mca.append(ans2idx[word])
+                else:
+                    mca.append(ans2idx['UNK'])
+
+            ans = []
+            for i, word in enumerate(qa['answer'].split()):
+                if i == ans_len:
+                    break
+                ans.append(qa['dictionary'].index(word)+4)
+            ans.append(EOS_TOKEN)
 
             self.vqas.append({
                 'v': os.path.join('data', 'vfeats', '{}.npy'.format(qa['file_path'])),
                 'q': que,
                 'a': ans,
-                'gt': np.array(0),
+                'mca': mca,
                 'q_txt': qa['question'],
                 'a_txt': qa['answer']
             })
@@ -56,8 +67,14 @@ class VqaDataset(Dataset):
         return len(self.vqas)
 
     def __getitem__(self, idx):
-        return np.load(self.vqas[idx]['v']), self.vqas[idx]['q'], self.vqas[idx]['a'],\
-               self.vqas[idx]['gt'], self.vqas[idx]['q_txt'], self.vqas[idx]['a_txt']
+        v = torch.from_numpy(np.load(self.vqas[idx]['v']))
+        q = torch.LongTensor(self.vqas[idx]['q'])
+        a = torch.LongTensor(self.vqas[idx]['a'])
+        mca = torch.LongTensor(self.vqas[idx]['mca'])
+        q_txt = self.vqas[idx]['q_txt']
+        a_txt = self.vqas[idx]['a_txt']
+
+        return v, q, a, mca, q_txt, a_txt
 
     @staticmethod
     def get_n_classes(fpath=os.path.join('data', 'dict_ans.pkl')):
@@ -68,6 +85,56 @@ class VqaDataset(Dataset):
     def get_vocab_size(fpath=os.path.join('data', 'dict_q.pkl')):
         idx2word, _ = pickle.load(open(fpath, 'rb'))
         return len(idx2word)
+
+
+def collate_fn(data):
+    """Creates mini-batch tensors from the list of tuples (v, q, a, mca, q_txt, a_txt).
+
+    We should build a custom collate_fn rather than using default collate_fn,
+    because merging sequences (including padding) is not supported in default.
+    Seqeuences are padded to the maximum length of mini-batch sequences (dynamic padding).
+
+    Args:
+        data: list of tuple (v, q, a, mca, q_txt, a_txt).
+            - v: torch tensor of shape (36,2048);
+            - q: torch tensor of shape (?); variable length.
+            - a: torch tensor of shape (?); variable length.
+            - mca: torch tensor of shape (100)
+            - q_txt: str
+            - a_txt: str
+
+    Returns:
+        src_seqs: torch tensor of shape (batch_size, padded_length).
+        src_lengths: list of length (batch_size); valid length for each padded source sequence.
+        trg_seqs: torch tensor of shape (batch_size, padded_length).
+        trg_lengths: list of length (batch_size); valid length for each padded target sequence.
+    """
+
+    def merge(batch):
+        return torch.stack([b for b in batch], 0)
+
+    def merge_seq(sequences):
+        lengths = [len(seq) for seq in sequences]
+        padded_seqs = torch.zeros(len(sequences), max(lengths)).long()
+        for i, seq in enumerate(sequences):
+            end = lengths[i]
+            padded_seqs[i, :end] = seq[:end]
+        return padded_seqs, lengths
+
+
+
+    data.sort(key=lambda x: len(x[1]), reverse=True)
+
+    # seperate data fields
+    v, q, a, mca, q_txt, a_txt = zip(*data)
+
+    # merge sequences (from tuple of 1D tensor to 2D tensor)
+    v = merge(v)
+    q, q_lengths = merge_seq(q)
+    a, a_lengths = merge_seq(a)
+    mca = merge(mca)
+
+    return v, q, a, mca, q_lengths, a_lengths, q_txt, a_txt
 
 
 def prepare_data(args):
@@ -90,14 +157,16 @@ def prepare_data(args):
                                                sampler=train_sampler,
                                                batch_size=args.batch_size,
                                                num_workers=args.n_workers,
-                                               pin_memory=args.pin_mem)
+                                               pin_memory=args.pin_mem,
+                                               collate_fn=collate_fn)
 
 
     val_loader = torch.utils.data.DataLoader(dataset_vqa,
-                                               sampler=valid_sampler,
-                                               batch_size=args.batch_size,
-                                               num_workers=args.n_workers,
-                                               pin_memory=args.pin_mem)
+                                             sampler=valid_sampler,
+                                             batch_size=args.batch_size,
+                                             num_workers=args.n_workers,
+                                             pin_memory=args.pin_mem,
+                                             collate_fn=collate_fn)
 
 
     vocab_size = VqaDataset.get_vocab_size()

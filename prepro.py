@@ -15,10 +15,11 @@ import numpy as np
 import nltk
 nltk.data.path.append('data')
 nltk.download('punkt', download_dir='data')
-from nltk.tokenize import word_tokenize
 from tqdm import tqdm
 
-data_path = os.path.join('data', 'train_task_1_valid.json')
+import constants
+
+data_path = os.path.join('data', 'train_task_1.json')
 glove_path = os.path.join('data', 'glove', 'glove.6B.300d.txt')
 
 
@@ -128,12 +129,10 @@ def process_a(freq_thr=9):
     print("Calculating the frequency of each multiple choice answer...")
     ans_freqs = {}
     for item in tqdm(train_data):
-        total_ans = item['answers'] + item['distractors']
-        for ans in total_ans:
+        answers = item['dictionary']
+        for ans in answers:
             temp_ans = process_digit_article(process_punctuation(ans))
-            temp_ans = temp_ans.replace(',', '')
-            for t_ans in temp_ans.split():
-                ans_freqs[t_ans] = ans_freqs.get(t_ans, 0) + 1
+            ans_freqs[temp_ans] = ans_freqs.get(temp_ans, 0) + 1
 
     # filter out rare answers
     for a, freq in list(ans_freqs.items()):
@@ -143,55 +142,56 @@ def process_a(freq_thr=9):
     print("Number of answers appear more than {} times: {}".format(freq_thr - 1, len(ans_freqs)))
 
     # generate answer dictionary
-    idx2ans = []
-    ans2idx = {}
+    idx2ans = ['PAD', 'UNK', 'SOS', 'EOS']
+    ans2idx = {'PAD': PAD_TOKEN, 'UNK': UNK_TOKEN, 'SOS': SOS_TOKEN, 'EOS': EOS_TOKEN}
     for i, a in enumerate(ans_freqs):
         idx2ans.append(a)
-        ans2idx[a] = i
+        ans2idx[a] = len(idx2ans) - 1
 
     targets = []
     for item in tqdm(train_data):
-        targets.append({
-            'question_id': item['question_id'],
-            'file_path': item['file_path'].split('.')[0],
-            'answer': item['answers'][0]
-        })
+        for ans in item['answers']:
+            targets.append({
+                'question_id': item['question_id'],
+                'file_path': item['file_path'].split('.')[0],
+                'answer': process_digit_article(process_punctuation(ans))
+            })
 
     pickle.dump([idx2ans, ans2idx], open(os.path.join('data', 'dict_ans.pkl'), 'wb'))
     return targets, idx2ans
 
 
-def tokenize(sentence):
-    sentence = sentence.lower().replace(',', '').replace('?', '')
-    return word_tokenize(sentence)
-
-
 def process_qa(targets, max_words=14):
 
     print("Merging QAs...")
-    idx2word = []
-    word2idx = {}
+    idx2word = ['PAD', 'UNK', 'SOS', 'EOS']
+    word2idx = {'PAD': PAD_TOKEN, 'UNK': UNK_TOKEN, 'SOS': SOS_TOKEN, 'EOS': EOS_TOKEN}
 
     train_data = json.load(open(data_path))['data']
     ques_ans = []
+    counter = 0
     for i, item in enumerate(tqdm(train_data)):
-        tokens = tokenize(item['question'])
+        tokens = [i.lower() for i in item['question_tokens']]
         for token in tokens:
             if token not in word2idx:
                 idx2word.append(token)
                 word2idx[token] = len(idx2word) - 1
 
-        assert item['question_id'] == targets[i]['question_id'],\
-                "Question ID doesn't match ({}: {})".format(item['question_id'], targets[i]['question_id'])
+        assert item['question_id'] == targets[counter]['question_id'],\
+                "Question ID doesn't match ({}: {})".format(item['question_id'],
+                                                            targets[counter]['question_id'])
 
-        ques_ans.append({
-            'file_path': item['file_path'].split('.')[0],
-            'question': item['question'],
-            'question_id': item['question_id'],
-            'question_toked': tokens,
-            'answer': targets[i]['answer'],
-            'distractors': item['distractors']
-        })
+        for _ in range(len(item['answers'])):
+            ques_ans.append({
+                'file_path': item['file_path'].split('.')[0],
+                'question': item['question'],
+                'question_id': item['question_id'],
+                'question_toked': tokens,
+                'answer': targets[counter]['answer'],
+                'dictionary': [process_digit_article(process_punctuation(ans))
+                                for ans in item['dictionary']]
+            })
+            counter += 1
 
     pickle.dump([idx2word, word2idx], open(os.path.join('data', 'dict_q.pkl'), 'wb'))
     pickle.dump(ques_ans, open(os.path.join('data', 'data_qa.pkl'), 'wb'))
@@ -207,10 +207,10 @@ def process_wemb(idx2word, embed_type):
     f = open(glove_path, 'r+', encoding="utf-8")
     for entry in f:
         vals = entry.split(' ')
-        word = vals[0]
+        word = vals[0].lower()
         word2emb[word] = np.asarray(vals[1:], dtype=np.float32)
 
-    pretrained_weights = np.zeros((len(idx2word), emb_dim), dtype=np.float32)
+    pretrained_weights = np.zeros((len(idx2word)+4, emb_dim), dtype=np.float32)
     for idx, word in enumerate(idx2word):
         if word not in word2emb:
             continue

@@ -47,13 +47,13 @@ def train(train_loader, model, optim, epoch, device, logger, moving_loss):
 
     batches = len(train_loader)
     start = time.time()
-    for step, (v, q, a, gt, _, _) in enumerate(train_loader):
+    for step, (v, q, a, mca, q_lens, a_lens, _, _) in enumerate(train_loader):
         data_time = time.time() - start
 
         v = v.to(device)
         q = q.to(device)
         a = a.to(device)
-        gt = gt.to(device)
+        mca = mca.to(device)
 
         logits = model(v, q, a)
         output = loss(logits, gt)

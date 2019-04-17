@@ -25,22 +25,25 @@ class QuestionEncoder(nn.Module):
     def __init__(self, vocab_size, embed_dim, gru_hidden_size):
 
         super(QuestionEncoder, self).__init__()
-        self.embeddings = nn.Embedding(vocab_size + 1, embed_dim)
-        pretrained_wemb = np.zeros((vocab_size + 1, embed_dim), dtype=np.float32)
-        pretrained_wemb[:vocab_size] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('question')))
+        self.embeddings = nn.Embedding(vocab_size + 4, embed_dim)
+        pretrained_wemb = np.zeros((vocab_size + 4, embed_dim), dtype=np.float32)
+        pretrained_wemb[4:] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('question')))
         self.embeddings.weight.data.copy_(torch.from_numpy(pretrained_wemb))
 
         self.encoder = nn.GRU(embed_dim, gru_hidden_size)
         self.enc_mlp = nn.Linear(3*gru_hidden_size, gru_hidden_size)
         self.do = nn.Dropout(p=0.2)
 
-    def forward(self, data):
-        data = self.embeddings(data)
-        self.encoder.flatten_parameters()
-        outputs, hidden = self.encoder(data.permute(1,0,2))
-        max_pool_out = F.adaptive_max_pool1d(outputs.permute(1,2,0), 1).squeeze()
-        avg_pool_out = F.adaptive_avg_pool1d(outputs.permute(1,2,0), 1).squeeze()
-        cat_out = torch.cat((outputs[-1], max_pool_out, avg_pool_out), dim=1)
+    def forward(self, data, q_lens):
+        data = self.embeddings(data)    # (batch_size,seq_len, embed_size)
+        data = data.permute(1,0,2)     # (seq_len, batch_size, embed_size)
+        data = torch.nn.utils.rnn.pack_padded_sequence(data, q_lens)
+        self.encoder.flatten_parameters()   # Multi-GPU Training
+        outputs, hidden = self.encoder(data)
+        outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(outputs)
+        max_pool_out = F.adaptive_max_pool1d(outputs.permute(1, 2, 0), 1).squeeze()
+        avg_pool_out = F.adaptive_avg_pool1d(outputs.permute(1, 2, 0), 1).squeeze()
+        cat_out = torch.cat((hidden.squeeze(), max_pool_out, avg_pool_out), dim=1)
         cat_out = self.enc_mlp(cat_out)
         ques_enc = self.do(cat_out)
 
@@ -51,20 +54,17 @@ class AnswerEncoder(nn.Module):
     def __init__(self, vocab_size, embed_dim, hidden_size):
 
         super(AnswerEncoder, self).__init__()
-        self.embeddings = nn.Embedding(vocab_size + 1, embed_dim)
-        pretrained_wemb = np.zeros((vocab_size + 1, embed_dim), dtype=np.float32)
-        pretrained_wemb[:vocab_size] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('answer')))
+        self.embeddings = nn.Embedding(vocab_size + 4, embed_dim)
+        pretrained_wemb = np.zeros((vocab_size + 4, embed_dim), dtype=np.float32)
+        pretrained_wemb[4:] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('answer')))
         self.embeddings.weight.data.copy_(torch.from_numpy(pretrained_wemb))
 
-        self.MLP1 = nn.Linear(embed_dim, 2048)
-        self.MLP2 = nn.Linear(2048, hidden_size)
+        self.MLP1 = nn.Linear(embed_dim, hidden_size)
         self.do = nn.Dropout(p=0.2)
 
     def forward(self, data):
         data = self.embeddings(data)
-        data = torch.mean(data, dim=2)
         data = self.MLP1(data)
-        data = self.MLP2(data)
         data = self.do(data)
 
         return data
@@ -169,11 +169,23 @@ class MultiChoiceClassifier(nn.Module):
         return outputs
 
 
-class Model(nn.Module):
+class AnswerDecoder(nn.Module):
+
+    def __init__(self):
+
+        super(AnswerDecoder, self).__init__()
+
+
+    def forward(self, input_step, last_hidden):
+        pass
+
+
+
+class VqEncoder(nn.Module):
 
     def __init__(self, vocab_size, word_embed_dim, hidden_size, resnet_out, num_answers):
 
-        super(Model, self).__init__()
+        super(VqEncoder, self).__init__()
         self.ques_encoder = QuestionEncoder(vocab_size,
                                             word_embed_dim,
                                             hidden_size)
@@ -185,21 +197,14 @@ class Model(nn.Module):
                                           resnet_out,
                                           hidden_size)
 
-        self.answer_encoder = AnswerEncoder(num_answers,
-                                            word_embed_dim,
-                                            hidden_size)
-
-        self.classifier = MultiChoiceClassifier()
-
     def forward(self, images, questions, answers):
 
         ques_enc = self.ques_encoder(questions)
         img_enc = self.img_encoder(images, ques_enc)
         joint_embed = self.joint_embed(ques_enc, img_enc)
-        answer_embed = self.answer_encoder(answers)
-        outputs = self.classifier(joint_embed, answer_embed)
 
-        return outputs
+        return joint_embed
+
 
 
 
