@@ -12,37 +12,68 @@ import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
 
-from model import Model
+from model import VqaEncoder, AnswerDecoder
 from utils import GOATLogger, save_ckpt, compute_score
 from data_loader import prepare_data
 from arguments import get_args
+from constants import *
 
 
 def evaluate(val_loader, model, epoch, device, logger):
-    model.eval()
-    loss = nn.CrossEntropyLoss()
+    for module in model:
+        module.eval()
+
+    cr_loss = nn.CrossEntropyLoss()
 
     batches = len(val_loader)
-    for step, (v, q, a, gt, _, _) in enumerate(tqdm(val_loader, ascii=True)):
+    for step, (v, q, a, mca, q_lens, a_lens, _, _) in enumerate(tqdm(val_loader, ascii=True)):
+
         v = v.to(device)
         q = q.to(device)
         a = a.to(device)
-        gt = gt.to(device)
+        mca = mca.to(device)
 
-        logits = model(v, q, a)
-        output = loss(logits, gt)
+        batch_size = len(a)
+        loss = 0
 
-        score = compute_score(logits, gt)
+        joint_embed, mca_embed = model[0](v, q, mca, q_lens)
 
-        logger.batch_info_eval(epoch, step, batches, output.item(), score)
+        decoder_input = torch.LongTensor([[SOS_TOKEN for _ in range(batch_size)]])
+        decoder_input = decoder_input.to(device)
+
+        decoder_hidden = joint_embed
+
+        for t in range(a.size(1)):
+            decoder_output, decoder_hidden = model[1](decoder_input,
+                                                      decoder_hidden,
+                                                      mca_embed)
+
+            _, topi = decoder_output.topk(1)
+            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
+            decoder_input = decoder_input.to(device)
+
+            loss += cr_loss(decoder_output, a)
+
+        score = 1 #compute_score(logits, gt)
+
+        logger.batch_info_eval(epoch, step, batches, loss.item(), score)
 
     score = logger.batch_info_eval(epoch, -1, batches)
     return score
 
 
-def train(train_loader, model, optim, epoch, device, logger, moving_loss):
-    model.train()
-    loss = nn.CrossEntropyLoss()
+def train(train_loader,
+          model,
+          optims,
+          epoch,
+          device,
+          logger,
+          moving_loss):
+
+    for module in model:
+        module.train()
+
+    cr_loss = nn.CrossEntropyLoss(ignore_index=0)
     smooth_const = 0.1
 
     batches = len(train_loader)
@@ -55,19 +86,43 @@ def train(train_loader, model, optim, epoch, device, logger, moving_loss):
         a = a.to(device)
         mca = mca.to(device)
 
-        logits = model(v, q, a)
-        output = loss(logits, gt)
+        batch_size = len(a)
+        loss = 0
 
-        optim.zero_grad()
-        output.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 0.25)
-        optim.step()
+        joint_embed, mca_embed = model[0](v, q, mca, q_lens)
 
-        moving_loss = (output.item() if epoch == 0 and step ==0 else 
-                        (1 - smooth_const) * moving_loss + smooth_const * output.item())
+        decoder_input = torch.LongTensor([[SOS_TOKEN for _ in range(batch_size)]])
+        decoder_input = decoder_input.to(device)
+
+        decoder_hidden = joint_embed
+
+        for t in range(a.size(1)):
+            decoder_output, decoder_hidden = model[1](decoder_input,
+                                                      decoder_hidden,
+                                                      mca_embed)
+
+            _, topi = decoder_output.topk(1)
+            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
+            decoder_input = decoder_input.to(device)
+
+            loss += cr_loss(decoder_output, a)
+
+        for optim in optims:
+            optim.zero_grad()
+
+        loss.backward()
+
+        for module in model:
+            nn.utils.clip_grad_norm_(module.parameters(), 0.25)
+
+        for optim in optims:
+            optim.step()
+
+        moving_loss = (loss.item() if epoch == 0 and step ==0 else
+                        (1 - smooth_const) * moving_loss + smooth_const * loss.item())
 
         batch_time = time.time() - start
-        score = compute_score(logits, gt)
+        score = 1 #compute_score(logits, a)
         logger.batch_info(epoch, step, batches, data_time, moving_loss, score, batch_time)
         start = time.time()
 
@@ -100,12 +155,21 @@ def main():
     train_loader, val_loader, vocab_size, num_answers = prepare_data(args)
 
     # Set up model
-    model = Model(vocab_size, args.word_embed_dim, args.hidden_size, args.resnet_out, num_answers)
-    model = nn.DataParallel(model).to(device)
-    logger.loginfo("Parameters: {:.3f}M".format(sum(p.numel() for p in model.parameters()) / 1e6))
+
+    vqa_enc = VqaEncoder(vocab_size, args.word_embed_dim, args.hidden_size, args.resnet_out)
+    ans_dec = AnswerDecoder(args.hidden_size)
+
+    model = [vqa_enc, ans_dec]
+
+    for idx, module in enumerate(model):
+        model[idx] = nn.DataParallel(module).to(device)
+
+    logger.loginfo("Parameters: {:.3f}M".format(sum(sum(p.numel() for p in module.parameters())
+                                                    for module in model) / 1e6))
 
     # Set up optimizer
-    optim = torch.optim.Adam(model.parameters(), 2e-4)
+    optims = [torch.optim.Adam(module.parameters(), 2e-4) for module in model]
+
 
     last_epoch = 0
     bscore = 0.0
@@ -115,8 +179,9 @@ def main():
         logger.loginfo("Initialized from ckpt: " + args.resume)
         ckpt = torch.load(args.resume, map_location=device)
         last_epoch = ckpt['epoch']
-        model.load_state_dict(ckpt['state_dict'])
-        optim.load_state_dict(ckpt['optim_state_dict'])
+        for idx, module in enumerate(model):
+            module.load_state_dict(ckpt['state_dict'])
+            optims[idx].load_state_dict(ckpt['optim_state_dict'])
 
     if args.mode == 'eval':
         _ = evaluate(val_loader, model, last_epoch, device, logger)
@@ -124,9 +189,9 @@ def main():
 
     # Train
     for epoch in range(last_epoch, args.epoch):
-        moving_loss = train(train_loader, model, optim, epoch, device, logger, moving_loss)
+        moving_loss = train(train_loader, model, optims, epoch, device, logger, moving_loss)
         score = evaluate(val_loader, model, epoch, device, logger)
-        bscore = save_ckpt(score, bscore, epoch, model, optim, args.save, logger)
+        #bscore = save_ckpt(score, bscore, epoch, model, optims, args.save, logger)
 
     logger.loginfo("Done")
 

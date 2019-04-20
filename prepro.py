@@ -17,7 +17,7 @@ nltk.data.path.append('data')
 nltk.download('punkt', download_dir='data')
 from tqdm import tqdm
 
-import constants
+from constants import *
 
 data_path = os.path.join('data', 'train_task_1.json')
 glove_path = os.path.join('data', 'glove', 'glove.6B.300d.txt')

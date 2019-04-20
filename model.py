@@ -171,21 +171,37 @@ class MultiChoiceClassifier(nn.Module):
 
 class AnswerDecoder(nn.Module):
 
-    def __init__(self):
+    def __init__(self, hidden_size):
 
         super(AnswerDecoder, self).__init__()
 
-
-    def forward(self, input_step, last_hidden):
-        pass
+        self.gru = nn.GRU(hidden_size, hidden_size)
 
 
+    def forward(self, input_step, last_hidden, mca):
+        """
 
-class VqEncoder(nn.Module):
+        Args:
+            input_step:
+            last_hidden:
+            mca: (batch_size, num_ans, embed_size)
 
-    def __init__(self, vocab_size, word_embed_dim, hidden_size, resnet_out, num_answers):
+        Returns:
+        """
 
-        super(VqEncoder, self).__init__()
+        input_embed = tuple(val[input_step[idx]] for idx, val in enumerate(mca))
+        input_embed = torch.stack(input_embed, 0).permute(1,0,2)
+        gru_output, gru_hidden = self.gru(input_embed, last_hidden) # (1, batch_size, hidden_size), (batch_size, hidden_size)
+        output = torch.bmm(mca, gru_output.permute(1,2,0)).squeeze()
+
+        return output, gru_hidden
+
+
+class VqaEncoder(nn.Module):
+
+    def __init__(self, vocab_size, word_embed_dim, hidden_size, resnet_out):
+
+        super(VqaEncoder, self).__init__()
         self.ques_encoder = QuestionEncoder(vocab_size,
                                             word_embed_dim,
                                             hidden_size)
@@ -197,13 +213,20 @@ class VqEncoder(nn.Module):
                                           resnet_out,
                                           hidden_size)
 
-    def forward(self, images, questions, answers):
+        self.ans_enc = AnswerEncoder(vocab_size,
+                                     word_embed_dim,
+                                     hidden_size)
 
-        ques_enc = self.ques_encoder(questions)
+
+    def forward(self, images, questions, mca, q_lens):
+
+        ques_enc = self.ques_encoder(questions, q_lens)
         img_enc = self.img_encoder(images, ques_enc)
         joint_embed = self.joint_embed(ques_enc, img_enc)
 
-        return joint_embed
+        mca_embed = self.ans_enc(mca)
+
+        return joint_embed, mca_embed
 
 
 

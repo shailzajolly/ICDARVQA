@@ -49,9 +49,15 @@ class VqaDataset(Dataset):
 
             ans = []
             for i, word in enumerate(qa['answer'].split()):
-                if i == ans_len:
+                if i == ans_len-1:
                     break
-                ans.append(qa['dictionary'].index(word)+4)
+
+                if word in qa['dictionary']:
+                    ans_idx = qa['dictionary'].index(word)+4
+                else:
+                    ans_idx = UNK_TOKEN
+
+                ans.append(ans_idx)
             ans.append(EOS_TOKEN)
 
             self.vqas.append({
@@ -111,7 +117,7 @@ def collate_fn(data):
     """
 
     def merge(batch):
-        return torch.stack([b for b in batch], 0)
+        return torch.stack(tuple(b for b in batch), 0)
 
     def merge_seq(sequences):
         lengths = [len(seq) for seq in sequences]
@@ -131,7 +137,7 @@ def collate_fn(data):
     # merge sequences (from tuple of 1D tensor to 2D tensor)
     v = merge(v)
     q, q_lengths = merge_seq(q)
-    a, a_lengths = merge_seq(a)
+    a, a_lengths = merge_seq(a, max_len=7)
     mca = merge(mca)
 
     return v, q, a, mca, q_lengths, a_lengths, q_txt, a_txt
