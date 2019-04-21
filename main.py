@@ -23,7 +23,7 @@ def evaluate(val_loader, model, epoch, device, logger):
     for module in model:
         module.eval()
 
-    cr_loss = nn.CrossEntropyLoss()
+    cr_loss = nn.CrossEntropyLoss(ignore_index=0)
 
     batches = len(val_loader)
     for step, (v, q, a, mca, q_lens, a_lens, _, _) in enumerate(tqdm(val_loader, ascii=True)):
@@ -32,16 +32,19 @@ def evaluate(val_loader, model, epoch, device, logger):
         q = q.to(device)
         a = a.to(device)
         mca = mca.to(device)
+        q_lens = q_lens.to(device)
 
         batch_size = len(a)
         loss = 0
+        print_loss = 0
+        n_totals = 0
 
         joint_embed, mca_embed = model[0](v, q, mca, q_lens)
 
-        decoder_input = torch.LongTensor([[SOS_TOKEN for _ in range(batch_size)]])
+        decoder_input = torch.LongTensor([SOS_TOKEN for _ in range(batch_size)])
         decoder_input = decoder_input.to(device)
 
-        decoder_hidden = joint_embed
+        decoder_hidden = joint_embed.unsqueeze(1)
 
         for t in range(a.size(1)):
             decoder_output, decoder_hidden = model[1](decoder_input,
@@ -49,14 +52,18 @@ def evaluate(val_loader, model, epoch, device, logger):
                                                       mca_embed)
 
             _, topi = decoder_output.topk(1)
-            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
+            decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)])
             decoder_input = decoder_input.to(device)
 
-            loss += cr_loss(decoder_output, a)
+            step_loss = cr_loss(decoder_output, a[:,t].view(-1,1))
+            loss += step_loss
+            nTotal = torch.sum(a[:,t]!=PAD_TOKEN).float()
+            print_loss += step_loss.item() * nTotal
+            n_totals += nTotal
 
         score = 1 #compute_score(logits, gt)
 
-        logger.batch_info_eval(epoch, step, batches, loss.item(), score)
+        logger.batch_info_eval(epoch, step, batches, (print_loss/n_totals).item(), score)
 
     score = logger.batch_info_eval(epoch, -1, batches)
     return score
@@ -85,16 +92,19 @@ def train(train_loader,
         q = q.to(device)
         a = a.to(device)
         mca = mca.to(device)
+        q_lens = q_lens.to(device)
 
         batch_size = len(a)
         loss = 0
+        print_loss = 0
+        n_totals = 0
 
         joint_embed, mca_embed = model[0](v, q, mca, q_lens)
 
-        decoder_input = torch.LongTensor([[SOS_TOKEN for _ in range(batch_size)]])
+        decoder_input = torch.LongTensor([SOS_TOKEN for _ in range(batch_size)]) # (batch_size, )
         decoder_input = decoder_input.to(device)
-
-        decoder_hidden = joint_embed
+        
+        decoder_hidden = joint_embed.unsqueeze(1) # (batch_size, 1, hidden_size)
 
         for t in range(a.size(1)):
             decoder_output, decoder_hidden = model[1](decoder_input,
@@ -102,24 +112,28 @@ def train(train_loader,
                                                       mca_embed)
 
             _, topi = decoder_output.topk(1)
-            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
+            decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)])
             decoder_input = decoder_input.to(device)
 
-            loss += cr_loss(decoder_output, a)
-
+            step_loss = cr_loss(decoder_output, a[:,t].view(-1,1))
+            loss += step_loss
+            nTotal = torch.sum(a[:,t]!=PAD_TOKEN).float()
+            print_loss += step_loss.item() * nTotal
+            n_totals += nTotal
+        
         for optim in optims:
             optim.zero_grad()
 
         loss.backward()
 
-        for module in model:
-            nn.utils.clip_grad_norm_(module.parameters(), 0.25)
+        #for module in model:
+        #    nn.utils.clip_grad_norm_(module.parameters(), 0.25)
 
         for optim in optims:
             optim.step()
 
-        moving_loss = (loss.item() if epoch == 0 and step ==0 else
-                        (1 - smooth_const) * moving_loss + smooth_const * loss.item())
+        moving_loss = ((print_loss/n_totals).item() if epoch == 0 and step == 0 else
+                        (1 - smooth_const) * moving_loss + smooth_const * (print_loss/n_totals).item())
 
         batch_time = time.time() - start
         score = 1 #compute_score(logits, a)
@@ -156,7 +170,7 @@ def main():
 
     # Set up model
 
-    vqa_enc = VqaEncoder(vocab_size, args.word_embed_dim, args.hidden_size, args.resnet_out)
+    vqa_enc = VqaEncoder(vocab_size, args.word_embed_dim, args.hidden_size, args.resnet_out, num_answers)
     ans_dec = AnswerDecoder(args.hidden_size)
 
     model = [vqa_enc, ans_dec]
@@ -168,7 +182,7 @@ def main():
                                                     for module in model) / 1e6))
 
     # Set up optimizer
-    optims = [torch.optim.Adam(module.parameters(), 2e-4) for module in model]
+    optims = [torch.optim.Adam(module.parameters(), args.lr) for module in model]
 
 
     last_epoch = 0

@@ -210,7 +210,7 @@ def process_wemb(idx2word, embed_type):
         word = vals[0].lower()
         word2emb[word] = np.asarray(vals[1:], dtype=np.float32)
 
-    pretrained_weights = np.zeros((len(idx2word)+4, emb_dim), dtype=np.float32)
+    pretrained_weights = np.zeros((len(idx2word), emb_dim), dtype=np.float32)
     for idx, word in enumerate(idx2word):
         if word not in word2emb:
             continue

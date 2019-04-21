@@ -125,7 +125,7 @@ def collate_fn(data):
         for i, seq in enumerate(sequences):
             end = lengths[i]
             padded_seqs[i, :end] = seq[:end]
-        return padded_seqs, lengths
+        return padded_seqs, torch.Tensor(lengths)
 
 
 
@@ -137,7 +137,7 @@ def collate_fn(data):
     # merge sequences (from tuple of 1D tensor to 2D tensor)
     v = merge(v)
     q, q_lengths = merge_seq(q)
-    a, a_lengths = merge_seq(a, max_len=7)
+    a, a_lengths = merge_seq(a)
     mca = merge(mca)
 
     return v, q, a, mca, q_lengths, a_lengths, q_txt, a_txt

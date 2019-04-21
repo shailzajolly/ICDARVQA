@@ -25,17 +25,19 @@ class QuestionEncoder(nn.Module):
     def __init__(self, vocab_size, embed_dim, gru_hidden_size):
 
         super(QuestionEncoder, self).__init__()
-        self.embeddings = nn.Embedding(vocab_size + 4, embed_dim)
-        pretrained_wemb = np.zeros((vocab_size + 4, embed_dim), dtype=np.float32)
-        pretrained_wemb[4:] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('question')))
+        self.embeddings = nn.Embedding(vocab_size, embed_dim)
+        pretrained_wemb = np.zeros((vocab_size, embed_dim), dtype=np.float32)
+        pretrained_wemb[0:vocab_size] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('question')))
         self.embeddings.weight.data.copy_(torch.from_numpy(pretrained_wemb))
 
         self.encoder = nn.GRU(embed_dim, gru_hidden_size)
         self.enc_mlp = nn.Linear(3*gru_hidden_size, gru_hidden_size)
-        self.do = nn.Dropout(p=0.2)
+        self.do1 = nn.Dropout(p=0.1)
+        self.do2 = nn.Dropout(p=0.2)
 
     def forward(self, data, q_lens):
-        data = self.embeddings(data)    # (batch_size,seq_len, embed_size)
+        data = self.embeddings(data) # (batch_size,seq_len, embed_size)
+        data = self.do1(data)
         data = data.permute(1,0,2)     # (seq_len, batch_size, embed_size)
         data = torch.nn.utils.rnn.pack_padded_sequence(data, q_lens)
         self.encoder.flatten_parameters()   # Multi-GPU Training
@@ -45,7 +47,7 @@ class QuestionEncoder(nn.Module):
         avg_pool_out = F.adaptive_avg_pool1d(outputs.permute(1, 2, 0), 1).squeeze()
         cat_out = torch.cat((hidden.squeeze(), max_pool_out, avg_pool_out), dim=1)
         cat_out = self.enc_mlp(cat_out)
-        ques_enc = self.do(cat_out)
+        ques_enc = self.do2(cat_out)
 
         return ques_enc
 
@@ -54,18 +56,20 @@ class AnswerEncoder(nn.Module):
     def __init__(self, vocab_size, embed_dim, hidden_size):
 
         super(AnswerEncoder, self).__init__()
-        self.embeddings = nn.Embedding(vocab_size + 4, embed_dim)
-        pretrained_wemb = np.zeros((vocab_size + 4, embed_dim), dtype=np.float32)
-        pretrained_wemb[4:] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('answer')))
+        self.embeddings = nn.Embedding(vocab_size, embed_dim)
+        pretrained_wemb = np.zeros((vocab_size, embed_dim), dtype=np.float32)
+        pretrained_wemb[0:vocab_size] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('answer')))
         self.embeddings.weight.data.copy_(torch.from_numpy(pretrained_wemb))
 
         self.MLP1 = nn.Linear(embed_dim, hidden_size)
-        self.do = nn.Dropout(p=0.2)
+        self.do1 = nn.Dropout(p=0.1)
+        self.do2 = nn.Dropout(p=0.2)
 
     def forward(self, data):
         data = self.embeddings(data)
-        data = self.MLP1(data)
-        data = self.do(data)
+        data = self.do1(data)
+        data = F.relu(self.MLP1(data))
+        data = self.do2(data)
 
         return data
 
@@ -176,30 +180,35 @@ class AnswerDecoder(nn.Module):
         super(AnswerDecoder, self).__init__()
 
         self.gru = nn.GRU(hidden_size, hidden_size)
+        self.do1 = nn.Dropout(p=0.1)
 
 
     def forward(self, input_step, last_hidden, mca):
         """
 
         Args:
-            input_step:
-            last_hidden:
-            mca: (batch_size, num_ans, embed_size)
+            input_step: (batch_size, 1)
+            last_hidden: (batch_size, 1, hidden_size)
+            mca: (batch_size, num_ans, hidden_size)
 
         Returns:
         """
+        
+        
 
         input_embed = tuple(val[input_step[idx]] for idx, val in enumerate(mca))
-        input_embed = torch.stack(input_embed, 0).permute(1,0,2)
-        gru_output, gru_hidden = self.gru(input_embed, last_hidden) # (1, batch_size, hidden_size), (batch_size, hidden_size)
-        output = torch.bmm(mca, gru_output.permute(1,2,0)).squeeze()
+        input_embed = torch.stack(input_embed, 0).unsqueeze(0)
+        input_embed = self.do1(input_embed)
 
-        return output, gru_hidden
+        gru_output, gru_hidden = self.gru(input_embed, last_hidden.permute(1, 0, 2)) # (1, batch_size, hidden_size), (1, batch_size, hidden_size)
+        output = torch.bmm(mca, gru_output.permute(1, 2, 0))
+
+        return output, gru_hidden.permute(1, 0, 2)
 
 
 class VqaEncoder(nn.Module):
 
-    def __init__(self, vocab_size, word_embed_dim, hidden_size, resnet_out):
+    def __init__(self, vocab_size, word_embed_dim, hidden_size, resnet_out, num_ans):
 
         super(VqaEncoder, self).__init__()
         self.ques_encoder = QuestionEncoder(vocab_size,
@@ -213,7 +222,7 @@ class VqaEncoder(nn.Module):
                                           resnet_out,
                                           hidden_size)
 
-        self.ans_enc = AnswerEncoder(vocab_size,
+        self.ans_enc = AnswerEncoder(num_ans,
                                      word_embed_dim,
                                      hidden_size)
 

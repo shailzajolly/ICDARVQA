@@ -23,6 +23,9 @@ def get_args():
                         help="Validation set split proportion")
     parser.add_argument('--epoch', type=int,
                         help="Epochs to train")
+    parser.add_argument('--lr', type=float, default=2e-4,
+                        help="Learning rate")
+
     # Paths
     parser.add_argument('--data-root', type=str, default='data',
                         help="Location of data")
