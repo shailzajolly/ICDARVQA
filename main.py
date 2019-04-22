@@ -55,7 +55,7 @@ def evaluate(val_loader, model, epoch, device, logger):
             decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)])
             decoder_input = decoder_input.to(device)
 
-            step_loss = cr_loss(decoder_output, a[:,t].view(-1,1))
+            step_loss = cr_loss(decoder_output, a[:,t].view(-1))
             loss += step_loss
             nTotal = torch.sum(a[:,t]!=PAD_TOKEN).float()
             print_loss += step_loss.item() * nTotal
@@ -80,7 +80,7 @@ def train(train_loader,
     for module in model:
         module.train()
 
-    cr_loss = nn.CrossEntropyLoss(ignore_index=0)
+    cr_loss = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
     smooth_const = 0.1
 
     batches = len(train_loader)
@@ -111,11 +111,12 @@ def train(train_loader,
                                                       decoder_hidden,
                                                       mca_embed)
 
+            
             _, topi = decoder_output.topk(1)
             decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)])
             decoder_input = decoder_input.to(device)
-
-            step_loss = cr_loss(decoder_output, a[:,t].view(-1,1))
+            
+            step_loss = cr_loss(decoder_output, a[:,t].view(-1))
             loss += step_loss
             nTotal = torch.sum(a[:,t]!=PAD_TOKEN).float()
             print_loss += step_loss.item() * nTotal

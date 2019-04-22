@@ -35,17 +35,11 @@ class VqaDataset(Dataset):
             for i, word in enumerate(qa['question_toked']):
                 if i == ques_len:
                     break
-                if word in word2idx:
-                    que.append(word2idx[word])
-                else:
-                    que.append(word2idx['UNK'])
+                que.append(word2idx.get(word, 1)) # append UNK index if word not in vocab
 
             mca = [PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN]
             for i, word in enumerate(qa['dictionary']):
-                if word in ans2idx:
-                    mca.append(ans2idx[word])
-                else:
-                    mca.append(ans2idx['UNK'])
+                mca.append(ans2idx.get(word, 1)) # append UNK index if word not in vocab
 
             ans = []
             for i, word in enumerate(qa['answer'].split()):
@@ -53,7 +47,7 @@ class VqaDataset(Dataset):
                     break
 
                 if word in qa['dictionary']:
-                    ans_idx = qa['dictionary'].index(word)+4
+                    ans_idx = qa['dictionary'].index(word) + 4
                 else:
                     ans_idx = UNK_TOKEN
 

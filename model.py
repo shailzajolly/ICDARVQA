@@ -32,8 +32,8 @@ class QuestionEncoder(nn.Module):
 
         self.encoder = nn.GRU(embed_dim, gru_hidden_size)
         self.enc_mlp = nn.Linear(3*gru_hidden_size, gru_hidden_size)
-        self.do1 = nn.Dropout(p=0.1)
-        self.do2 = nn.Dropout(p=0.1)
+        self.do1 = nn.Dropout(p=0.2)
+        self.do2 = nn.Dropout(p=0.2)
 
     def forward(self, data, q_lens):
         data = self.embeddings(data) # (batch_size,seq_len, embed_size)
@@ -62,8 +62,8 @@ class AnswerEncoder(nn.Module):
         self.embeddings.weight.data.copy_(torch.from_numpy(pretrained_wemb))
 
         self.MLP1 = nn.Linear(embed_dim, hidden_size)
-        self.do1 = nn.Dropout(p=0.1)
-        self.do2 = nn.Dropout(p=0.1)
+        self.do1 = nn.Dropout(p=0.2)
+        self.do2 = nn.Dropout(p=0.2)
 
     def forward(self, data):
         data = self.embeddings(data)
@@ -95,6 +95,7 @@ class ImageEncoder(nn.Module):
 
         super(ImageEncoder, self).__init__()
         self.attention = TopDownAttention(inp_size, hidden_size)
+        self.do1 = nn.Dropout(p=0.2)
 
     def forward(self, img_features, ques_features):
 
@@ -102,6 +103,7 @@ class ImageEncoder(nn.Module):
         concat_features = torch.cat((ques_features, img_features), 2)  # N * k * (enc_size + img_size)
         attn_probs = self.attention(concat_features)   # N * k * 1
         img_encode = torch.sum(torch.mul(img_features, attn_probs), dim=1)
+        img_encode = self.do1(img_encode)
 
         return img_encode
 
@@ -112,7 +114,7 @@ class JointEmbedding(nn.Module):
         super(JointEmbedding, self).__init__()
         self.ques_nonlinear = GatedTanh(ques_inp_size, out_size)
         self.img_nonlinear = GatedTanh(img_inp_size, out_size)
-        self.do = nn.Dropout(p=0.2)
+        self.do = nn.Dropout(p=0.5)
 
     def forward(self, ques_features, img_features):
 
@@ -180,7 +182,7 @@ class AnswerDecoder(nn.Module):
         super(AnswerDecoder, self).__init__()
 
         self.gru = nn.GRU(hidden_size, hidden_size)
-        self.do1 = nn.Dropout(p=0.2)
+        self.do1 = nn.Dropout(p=0.3)
 
 
     def forward(self, input_step, last_hidden, mca):
@@ -200,7 +202,7 @@ class AnswerDecoder(nn.Module):
         input_embed = torch.stack(input_embed, 0).unsqueeze(0)
         gru_output, gru_hidden = self.gru(input_embed, last_hidden.permute(1, 0, 2)) # (1, batch_size, hidden_size), (1, batch_size, hidden_size)
         gru_output = self.do1(gru_output)
-        output = torch.bmm(mca, gru_output.permute(1, 2, 0))
+        output = torch.bmm(mca, gru_output.permute(1, 2, 0)).squeeze()
 
         return output, gru_hidden.permute(1, 0, 2)
 
