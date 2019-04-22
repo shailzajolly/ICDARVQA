@@ -126,8 +126,8 @@ def train(train_loader,
 
         loss.backward()
 
-        #for module in model:
-        #    nn.utils.clip_grad_norm_(module.parameters(), 0.25)
+        for module in model:
+            nn.utils.clip_grad_norm_(module.parameters(), 0.25)
 
         for optim in optims:
             optim.step()

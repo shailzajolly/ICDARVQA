@@ -9,5 +9,5 @@ python main.py --mode "train" \
                --data-root data/ \
                --save log/ \
                --log-freq 11 \
-	       --lr 1e-3
+	       --lr 2e-4
 
