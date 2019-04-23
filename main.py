@@ -1,32 +1,29 @@
 from __future__ import division, print_function, absolute_import
 
-import os
-import pdb
 import time
 import random
-import argparse
+import os
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
 from tqdm import tqdm
 
 from model import VqaEncoder, AnswerDecoder
-from utils import GOATLogger, save_ckpt, compute_score
+from utils import GOATLogger
 from data_loader import prepare_data
 from arguments import get_args
 from constants import *
+from metrics import VqaMetric
 
 
-def evaluate(val_loader, model, epoch, device, logger):
+def evaluate(val_loader, model, epoch, device, logger, vqa_metric):
     for module in model:
         module.eval()
 
     cr_loss = nn.CrossEntropyLoss(ignore_index=0)
 
     batches = len(val_loader)
-    for step, (v, q, a, mca, q_lens, a_lens, _, _) in enumerate(tqdm(val_loader, ascii=True)):
+    for step, (v, q, a, mca, q_lens, a_lens, _, a_txt) in enumerate(tqdm(val_loader, ascii=True)):
 
         v = v.to(device)
         q = q.to(device)
@@ -41,10 +38,12 @@ def evaluate(val_loader, model, epoch, device, logger):
 
         joint_embed, mca_embed = model[0](v, q, mca, q_lens)
 
+        decoder_out_idxs = []
+
         decoder_input = torch.LongTensor([SOS_TOKEN for _ in range(batch_size)])
         decoder_input = decoder_input.to(device)
 
-        decoder_hidden = joint_embed.unsqueeze(1)
+        decoder_hidden = joint_embed.unsqueeze(0)
 
         for t in range(a.size(1)):
             decoder_output, decoder_hidden = model[1](decoder_input,
@@ -55,13 +54,15 @@ def evaluate(val_loader, model, epoch, device, logger):
             decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)])
             decoder_input = decoder_input.to(device)
 
-            step_loss = cr_loss(decoder_output, a[:,t].view(-1))
+            decoder_out_idxs.append(vqa_metric.get_real_idxs(decoder_input, mca))
+
+            step_loss = cr_loss(decoder_output, a[:, t].view(-1))
             loss += step_loss
-            nTotal = torch.sum(a[:,t]!=PAD_TOKEN).float()
+            nTotal = torch.sum(a[:, t] != PAD_TOKEN).float()
             print_loss += step_loss.item() * nTotal
             n_totals += nTotal
 
-        score = 1 #compute_score(logits, gt)
+        score = vqa_metric.compute_score(decoder_out_idxs, a_txt)
 
         logger.batch_info_eval(epoch, step, batches, (print_loss/n_totals).item(), score)
 
@@ -75,6 +76,7 @@ def train(train_loader,
           epoch,
           device,
           logger,
+          vqa_metric,
           moving_loss):
 
     for module in model:
@@ -85,7 +87,7 @@ def train(train_loader,
 
     batches = len(train_loader)
     start = time.time()
-    for step, (v, q, a, mca, q_lens, a_lens, _, _) in enumerate(train_loader):
+    for step, (v, q, a, mca, q_lens, a_lens, _, a_txt) in enumerate(train_loader):
         data_time = time.time() - start
 
         v = v.to(device)
@@ -101,10 +103,12 @@ def train(train_loader,
 
         joint_embed, mca_embed = model[0](v, q, mca, q_lens)
 
+        decoder_out_idxs = []
+
         decoder_input = torch.LongTensor([SOS_TOKEN for _ in range(batch_size)]) # (batch_size, )
         decoder_input = decoder_input.to(device)
-        
-        decoder_hidden = joint_embed.unsqueeze(1) # (batch_size, 1, hidden_size)
+
+        decoder_hidden = joint_embed.unsqueeze(0) # (1, batch_size, hidden_size)
 
         for t in range(a.size(1)):
             decoder_output, decoder_hidden = model[1](decoder_input,
@@ -115,7 +119,9 @@ def train(train_loader,
             _, topi = decoder_output.topk(1)
             decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)])
             decoder_input = decoder_input.to(device)
-            
+
+            decoder_out_idxs.append(vqa_metric.get_real_idxs(decoder_input, mca))
+
             step_loss = cr_loss(decoder_output, a[:,t].view(-1))
             loss += step_loss
             nTotal = torch.sum(a[:,t]!=PAD_TOKEN).float()
@@ -137,7 +143,7 @@ def train(train_loader,
                         (1 - smooth_const) * moving_loss + smooth_const * (print_loss/n_totals).item())
 
         batch_time = time.time() - start
-        score = 1 #compute_score(logits, a)
+        score = vqa_metric.compute_score(decoder_out_idxs, a_txt)
         logger.batch_info(epoch, step, batches, data_time, moving_loss, score, batch_time)
         start = time.time()
 
@@ -152,6 +158,8 @@ def main():
         raise NameError("Argument {} not recognized".format(unparsed))
 
     logger = GOATLogger(args.mode, args.save, args.log_freq)
+    vqa_metric = VqaMetric(os.path.join('data', 'dict_ans.pkl'))
+
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     if args.cpu:
@@ -199,13 +207,13 @@ def main():
             optims[idx].load_state_dict(ckpt['optim_state_dict'])
 
     if args.mode == 'eval':
-        _ = evaluate(val_loader, model, last_epoch, device, logger)
+        _ = evaluate(val_loader, model, last_epoch, device, logger, vqa_metric)
         return
 
     # Train
     for epoch in range(last_epoch, args.epoch):
-        moving_loss = train(train_loader, model, optims, epoch, device, logger, moving_loss)
-        score = evaluate(val_loader, model, epoch, device, logger)
+        moving_loss = train(train_loader, model, optims, epoch, device, logger, vqa_metric, moving_loss)
+        score = evaluate(val_loader, model, epoch, device, logger, vqa_metric)
         #bscore = save_ckpt(score, bscore, epoch, model, optims, args.save, logger)
 
     logger.loginfo("Done")

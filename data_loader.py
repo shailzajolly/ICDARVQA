@@ -60,7 +60,7 @@ class VqaDataset(Dataset):
                 'a': ans,
                 'mca': mca,
                 'q_txt': qa['question'],
-                'a_txt': qa['answer']
+                'a_txt': qa['answers']
             })
 
     def __len__(self):

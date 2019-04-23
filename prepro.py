@@ -122,6 +122,10 @@ def process_digit_article(inText):
     return outText
 
 
+def process_txt(str1):
+    return process_digit_article(process_punctuation(str1))
+
+
 def process_a(freq_thr=9):
 
     train_data = json.load(open(data_path))['data']
@@ -131,7 +135,7 @@ def process_a(freq_thr=9):
     for item in tqdm(train_data):
         answers = item['dictionary']
         for ans in answers:
-            temp_ans = process_digit_article(process_punctuation(ans))
+            temp_ans = process_txt(ans)
             ans_freqs[temp_ans] = ans_freqs.get(temp_ans, 0) + 1
 
     # filter out rare answers
@@ -154,7 +158,7 @@ def process_a(freq_thr=9):
             targets.append({
                 'question_id': item['question_id'],
                 'file_path': item['file_path'].split('.')[0],
-                'answer': process_digit_article(process_punctuation(ans))
+                'answer': process_txt(ans)
             })
 
     pickle.dump([idx2ans, ans2idx], open(os.path.join('data', 'dict_ans.pkl'), 'wb'))
@@ -188,8 +192,8 @@ def process_qa(targets, max_words=14):
                 'question_id': item['question_id'],
                 'question_toked': tokens,
                 'answer': targets[counter]['answer'],
-                'dictionary': [process_digit_article(process_punctuation(ans))
-                                for ans in item['dictionary']]
+                'answers': [process_txt(ans) for ans in item['answers']],
+                'dictionary': [process_txt(ans) for ans in item['dictionary']]
             })
             counter += 1
 

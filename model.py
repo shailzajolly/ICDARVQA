@@ -185,26 +185,24 @@ class AnswerDecoder(nn.Module):
         self.do1 = nn.Dropout(p=0.3)
 
 
-    def forward(self, input_step, last_hidden, mca):
+    def forward(self, input_step, last_hidden, mca_embed):
         """
 
         Args:
             input_step: (batch_size, 1)
-            last_hidden: (batch_size, 1, hidden_size)
+            last_hidden: (1, batch_size, hidden_size)
             mca: (batch_size, num_ans, hidden_size)
 
         Returns:
         """
-        
-        
 
-        input_embed = tuple(val[input_step[idx]] for idx, val in enumerate(mca))
+        input_embed = tuple(val[input_step[idx]] for idx, val in enumerate(mca_embed))
         input_embed = torch.stack(input_embed, 0).unsqueeze(0)
-        gru_output, gru_hidden = self.gru(input_embed, last_hidden.permute(1, 0, 2)) # (1, batch_size, hidden_size), (1, batch_size, hidden_size)
+        gru_output, gru_hidden = self.gru(input_embed, last_hidden) # (1, batch_size, hidden_size), (1, batch_size, hidden_size)
         gru_output = self.do1(gru_output)
         output = torch.bmm(mca, gru_output.permute(1, 2, 0)).squeeze()
 
-        return output, gru_hidden.permute(1, 0, 2)
+        return output, gru_hidden
 
 
 class VqaEncoder(nn.Module):
