@@ -108,7 +108,7 @@ def train(train_loader,
         decoder_input = torch.LongTensor([SOS_TOKEN for _ in range(batch_size)]) # (batch_size, )
         decoder_input = decoder_input.to(device)
 
-        decoder_hidden = joint_embed.unsqueeze(0) # (1, batch_size, hidden_size)
+        decoder_hidden = joint_embed.unsqueeze(1) # (batch_size, 1, hidden_size). Due to multi-gpu training.
 
         for t in range(a.size(1)):
             decoder_output, decoder_hidden = model[1](decoder_input,
