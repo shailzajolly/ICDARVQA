@@ -123,7 +123,7 @@ def process_digit_article(inText):
 
 
 def process_txt(str1):
-    return process_digit_article(process_punctuation(str1))
+    return str1.lower()
 
 
 def process_a(freq_thr=9):
@@ -135,9 +135,11 @@ def process_a(freq_thr=9):
     for item in tqdm(train_data):
         answers = item['dictionary']
         for ans in answers:
+            if len(ans)==0:
+                ans=' '
             temp_ans = process_txt(ans)
             ans_freqs[temp_ans] = ans_freqs.get(temp_ans, 0) + 1
-
+    
     # filter out rare answers
     for a, freq in list(ans_freqs.items()):
         if freq < freq_thr:

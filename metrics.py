@@ -19,7 +19,7 @@ class VqaMetric():
         Returns:
         """
 
-        real_idxs = torch.gather(mca, decoder_input.unsqueeze(1))
+        real_idxs = torch.gather(mca, 1, decoder_input.unsqueeze(1))
         return real_idxs.squeeze()
 
 
@@ -31,15 +31,23 @@ class VqaMetric():
             words = [self.idx2ans[ans_idx.item()] for ans_idx in time_step]
             output_ans.append(words)
 
-        ans_sents = [" ".join(sent).replace("PAD","").replace("EOS", "").strip()
-                     for sent in zip(*output_ans)]
-
+        ans_sents = []
+        for sent in zip(*output_ans):
+            clean_sent = []
+            for word in sent:
+                if word=='EOS':
+                    break
+                clean_sent.append(word)
+            ans_sents.append(" ".join(clean_sent))
+        
         return ans_sents
 
 
     def icdar_metric(self, pred, gts):
         scores = []
         for gt in gts:
+            #print("preds:", pred)
+            #print("gt:", gt)
             score = 1 - (nltk.edit_distance(pred, gt) / float(max(len(pred), len(gt))))
             if score >= 0.5:
                 scores.append(score)

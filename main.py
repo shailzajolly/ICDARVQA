@@ -43,7 +43,7 @@ def evaluate(val_loader, model, epoch, device, logger, vqa_metric):
         decoder_input = torch.LongTensor([SOS_TOKEN for _ in range(batch_size)])
         decoder_input = decoder_input.to(device)
 
-        decoder_hidden = joint_embed.unsqueeze(0)
+        decoder_hidden = joint_embed.unsqueeze(1)
 
         for t in range(a.size(1)):
             decoder_output, decoder_hidden = model[1](decoder_input,
