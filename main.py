@@ -9,7 +9,7 @@ import torch.nn as nn
 from tqdm import tqdm
 
 from model import VqaEncoder, AnswerDecoder
-from utils import GOATLogger
+from utils import GOATLogger, save_ckpt
 from data_loader import prepare_data
 from arguments import get_args
 from constants import *
@@ -117,10 +117,12 @@ def train(train_loader,
 
             
             _, topi = decoder_output.topk(1)
-            decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)])
-            decoder_input = decoder_input.to(device)
+            greedy_idxs = torch.LongTensor([topi[i][0] for i in range(batch_size)])
+            greedy_idxs = greedy_idxs.to(device)
 
-            decoder_out_idxs.append(vqa_metric.get_real_idxs(decoder_input, mca))
+            decoder_input = a[:,t].view(-1)
+
+            decoder_out_idxs.append(vqa_metric.get_real_idxs(greedy_idxs, mca))
 
             step_loss = cr_loss(decoder_output, a[:,t].view(-1))
             loss += step_loss
@@ -203,8 +205,8 @@ def main():
         ckpt = torch.load(args.resume, map_location=device)
         last_epoch = ckpt['epoch']
         for idx, module in enumerate(model):
-            module.load_state_dict(ckpt['state_dict'])
-            optims[idx].load_state_dict(ckpt['optim_state_dict'])
+            module.load_state_dict(ckpt['state_dict_'+str(idx)])
+            optims[idx].load_state_dict(ckpt['optim_state_dict_'+str(idx)])
 
     if args.mode == 'eval':
         _ = evaluate(val_loader, model, last_epoch, device, logger, vqa_metric)
@@ -214,7 +216,7 @@ def main():
     for epoch in range(last_epoch, args.epoch):
         moving_loss = train(train_loader, model, optims, epoch, device, logger, vqa_metric, moving_loss)
         score = evaluate(val_loader, model, epoch, device, logger, vqa_metric)
-        #bscore = save_ckpt(score, bscore, epoch, model, optims, args.save, logger)
+        bscore = save_ckpt(score, bscore, epoch, model, optims, args.save, logger)
 
     logger.loginfo("Done")
 

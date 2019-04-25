@@ -107,8 +107,10 @@ def save_ckpt(score, bscore, epoch, model, optim, save, logger):
 
     torch.save({
         'epoch': epoch+1,
-        'state_dict': model.state_dict(),
-        'optim_state_dict': optim.state_dict(),
+        'state_dict_0': model[0].state_dict(),
+        'state_dict_1': model[1].state_dict(),
+        'optim_state_dict_0': optim[0].state_dict(),
+        'optim_state_dict_1': optim[1].state_dict(),
         'score': score}, os.path.join(save, 'ckpts', 'model_{}.pth.tar'.format(epoch)))
 
     if score > bscore:

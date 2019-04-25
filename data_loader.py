@@ -16,7 +16,7 @@ from constants import *
 
 class VqaDataset(Dataset):
 
-    def __init__(self, root, ques_len=14, ans_len=7):
+    def __init__(self, root, ques_len=14, ans_len=4):
         """
         root (str): path to data directory
         seqlen (int): maximum words in a question
