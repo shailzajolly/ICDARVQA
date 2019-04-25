@@ -178,15 +178,21 @@ class MultiChoiceClassifier(nn.Module):
 
 class AnswerDecoder(nn.Module):
 
-    def __init__(self, hidden_size):
+    def __init__(self, num_ans, embed_dim, hidden_size):
 
         super(AnswerDecoder, self).__init__()
+        self.embeddings = nn.Embedding(num_ans, embed_dim)
+        pretrained_wemb = np.zeros((num_ans, embed_dim), dtype=np.float32)
+        pretrained_wemb[0:num_ans] = np.load(os.path.join('data', 'glove_pretrained_{}.npy'.format('answer')))
+        self.embeddings.weight.data.copy_(torch.from_numpy(pretrained_wemb))
 
-        self.gru = nn.GRU(hidden_size, hidden_size)
+        self.gru = nn.GRU(embed_dim, hidden_size)
         self.do1 = nn.Dropout(p=0.4)
 
+        self.mlp = nn.Linear(hidden_size, num_ans)
 
-    def forward(self, input_step, last_hidden, mca_embed):
+
+    def forward(self, input_step, last_hidden):
         """
 
         Args:
@@ -195,20 +201,21 @@ class AnswerDecoder(nn.Module):
             mca: (batch_size, num_ans, hidden_size)
 
         Returns:
+            output: (batch_size, num_ans)
+            gru_hidden: (batch_size, 1, hidden_size)
         """
 
-        input_embed = tuple(val[input_step[idx]] for idx, val in enumerate(mca_embed))
-        input_embed = torch.stack(input_embed, 0).unsqueeze(0)
+        input_embed = self.embeddings(input_step).unsqueeze(0) # (1, batch_size, embed_size)
         gru_output, gru_hidden = self.gru(input_embed, last_hidden.permute(1, 0, 2)) # (1, batch_size, hidden_size), (1, batch_size, hidden_size)
         gru_output = self.do1(gru_output)
-        output = torch.bmm(mca_embed, gru_output.permute(1, 2, 0)).squeeze()
+        output = self.mlp(gru_output.squeeze())
 
         return output, gru_hidden.permute(1, 0, 2)
 
 
 class VqaEncoder(nn.Module):
 
-    def __init__(self, vocab_size, word_embed_dim, hidden_size, resnet_out, num_ans):
+    def __init__(self, vocab_size, word_embed_dim, hidden_size, resnet_out):
 
         super(VqaEncoder, self).__init__()
         self.ques_encoder = QuestionEncoder(vocab_size,
@@ -222,20 +229,14 @@ class VqaEncoder(nn.Module):
                                           resnet_out,
                                           hidden_size)
 
-        self.ans_enc = AnswerEncoder(num_ans,
-                                     word_embed_dim,
-                                     hidden_size)
 
-
-    def forward(self, images, questions, mca, q_lens):
+    def forward(self, images, questions, q_lens):
 
         ques_enc = self.ques_encoder(questions, q_lens)
         img_enc = self.img_encoder(images, ques_enc)
         joint_embed = self.joint_embed(ques_enc, img_enc)
 
-        mca_embed = self.ans_enc(mca)
-
-        return joint_embed, mca_embed
+        return joint_embed
 
 
 

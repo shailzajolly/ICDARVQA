@@ -35,30 +35,19 @@ class VqaDataset(Dataset):
             for i, word in enumerate(qa['question_toked']):
                 if i == ques_len:
                     break
-                que.append(word2idx.get(word, 1)) # append UNK index if word not in vocab
-
-            mca = [PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN]
-            for i, word in enumerate(qa['dictionary']):
-                mca.append(ans2idx.get(word, 1)) # append UNK index if word not in vocab
+                que.append(word2idx.get(word, UNK_TOKEN)) # append UNK index if word not in vocab
 
             ans = []
             for i, word in enumerate(qa['answer'].split()):
                 if i == ans_len-1:
                     break
-
-                if word in qa['dictionary']:
-                    ans_idx = qa['dictionary'].index(word) + 4
-                else:
-                    ans_idx = UNK_TOKEN
-
-                ans.append(ans_idx)
+                ans.append(ans2idx.get(word, UNK_TOKEN))
             ans.append(EOS_TOKEN)
 
             self.vqas.append({
                 'v': os.path.join('data', 'vfeats', '{}.npy'.format(qa['file_path'])),
                 'q': que,
                 'a': ans,
-                'mca': mca,
                 'q_txt': qa['question'],
                 'a_txt': qa['answers']
             })
@@ -70,11 +59,10 @@ class VqaDataset(Dataset):
         v = torch.from_numpy(np.load(self.vqas[idx]['v']))
         q = torch.LongTensor(self.vqas[idx]['q'])
         a = torch.LongTensor(self.vqas[idx]['a'])
-        mca = torch.LongTensor(self.vqas[idx]['mca'])
         q_txt = self.vqas[idx]['q_txt']
         a_txt = self.vqas[idx]['a_txt']
 
-        return v, q, a, mca, q_txt, a_txt
+        return v, q, a, q_txt, a_txt
 
     @staticmethod
     def get_n_classes(fpath=os.path.join('data', 'dict_ans.pkl')):
@@ -95,19 +83,15 @@ def collate_fn(data):
     Seqeuences are padded to the maximum length of mini-batch sequences (dynamic padding).
 
     Args:
-        data: list of tuple (v, q, a, mca, q_txt, a_txt).
+        data: list of tuple (v, q, a, q_txt, a_txt).
             - v: torch tensor of shape (36,2048);
             - q: torch tensor of shape (?); variable length.
             - a: torch tensor of shape (?); variable length.
-            - mca: torch tensor of shape (100)
             - q_txt: str
             - a_txt: str
 
     Returns:
-        src_seqs: torch tensor of shape (batch_size, padded_length).
-        src_lengths: list of length (batch_size); valid length for each padded source sequence.
-        trg_seqs: torch tensor of shape (batch_size, padded_length).
-        trg_lengths: list of length (batch_size); valid length for each padded target sequence.
+
     """
 
     def merge(batch):
@@ -126,15 +110,14 @@ def collate_fn(data):
     data.sort(key=lambda x: len(x[1]), reverse=True)
 
     # seperate data fields
-    v, q, a, mca, q_txt, a_txt = zip(*data)
+    v, q, a, q_txt, a_txt = zip(*data)
 
     # merge sequences (from tuple of 1D tensor to 2D tensor)
     v = merge(v)
     q, q_lengths = merge_seq(q)
     a, a_lengths = merge_seq(a)
-    mca = merge(mca)
 
-    return v, q, a, mca, q_lengths, a_lengths, q_txt, a_txt
+    return v, q, a, q_lengths, a_lengths, q_txt, a_txt
 
 
 def prepare_data(args):

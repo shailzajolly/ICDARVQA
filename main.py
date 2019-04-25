@@ -23,12 +23,11 @@ def evaluate(val_loader, model, epoch, device, logger, vqa_metric):
     cr_loss = nn.CrossEntropyLoss(ignore_index=0)
 
     batches = len(val_loader)
-    for step, (v, q, a, mca, q_lens, a_lens, _, a_txt) in enumerate(tqdm(val_loader, ascii=True)):
+    for step, (v, q, a, q_lens, a_lens, _, a_txt) in enumerate(tqdm(val_loader, ascii=True)):
 
         v = v.to(device)
         q = q.to(device)
         a = a.to(device)
-        mca = mca.to(device)
         q_lens = q_lens.to(device)
 
         batch_size = len(a)
@@ -36,7 +35,7 @@ def evaluate(val_loader, model, epoch, device, logger, vqa_metric):
         print_loss = 0
         n_totals = 0
 
-        joint_embed, mca_embed = model[0](v, q, mca, q_lens)
+        joint_embed = model[0](v, q, q_lens)
 
         decoder_out_idxs = []
 
@@ -47,14 +46,13 @@ def evaluate(val_loader, model, epoch, device, logger, vqa_metric):
 
         for t in range(a.size(1)):
             decoder_output, decoder_hidden = model[1](decoder_input,
-                                                      decoder_hidden,
-                                                      mca_embed)
+                                                      decoder_hidden)
 
             _, topi = decoder_output.topk(1)
             decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)])
             decoder_input = decoder_input.to(device)
 
-            decoder_out_idxs.append(vqa_metric.get_real_idxs(decoder_input, mca))
+            decoder_out_idxs.append(decoder_input)
 
             step_loss = cr_loss(decoder_output, a[:, t].view(-1))
             loss += step_loss
@@ -87,13 +85,12 @@ def train(train_loader,
 
     batches = len(train_loader)
     start = time.time()
-    for step, (v, q, a, mca, q_lens, a_lens, _, a_txt) in enumerate(train_loader):
+    for step, (v, q, a, q_lens, a_lens, _, a_txt) in enumerate(train_loader):
         data_time = time.time() - start
 
         v = v.to(device)
         q = q.to(device)
         a = a.to(device)
-        mca = mca.to(device)
         q_lens = q_lens.to(device)
 
         batch_size = len(a)
@@ -101,19 +98,18 @@ def train(train_loader,
         print_loss = 0
         n_totals = 0
 
-        joint_embed, mca_embed = model[0](v, q, mca, q_lens)
+        joint_embed = model[0](v, q, q_lens)
 
         decoder_out_idxs = []
 
         decoder_input = torch.LongTensor([SOS_TOKEN for _ in range(batch_size)]) # (batch_size, )
         decoder_input = decoder_input.to(device)
 
-        decoder_hidden = joint_embed.unsqueeze(1) # (batch_size, 1, hidden_size). Due to multi-gpu training.
+        decoder_hidden = joint_embed.unsqueeze(1) # (batch_size, 1, hidden_size). Batch first due to multi-gpu training.
 
         for t in range(a.size(1)):
             decoder_output, decoder_hidden = model[1](decoder_input,
-                                                      decoder_hidden,
-                                                      mca_embed)
+                                                      decoder_hidden)
 
             
             _, topi = decoder_output.topk(1)
@@ -122,7 +118,7 @@ def train(train_loader,
 
             decoder_input = a[:,t].view(-1)
 
-            decoder_out_idxs.append(vqa_metric.get_real_idxs(greedy_idxs, mca))
+            decoder_out_idxs.append(greedy_idxs)
 
             step_loss = cr_loss(decoder_output, a[:,t].view(-1))
             loss += step_loss
@@ -181,8 +177,8 @@ def main():
 
     # Set up model
 
-    vqa_enc = VqaEncoder(vocab_size, args.word_embed_dim, args.hidden_size, args.resnet_out, num_answers)
-    ans_dec = AnswerDecoder(args.hidden_size)
+    vqa_enc = VqaEncoder(vocab_size, args.word_embed_dim, args.hidden_size, args.resnet_out)
+    ans_dec = AnswerDecoder(num_answers, args.word_embed_dim, args.hidden_size)
 
     model = [vqa_enc, ans_dec]
 

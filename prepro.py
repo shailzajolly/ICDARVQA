@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from constants import *
 
-data_path = os.path.join('data', 'train_task_1.json')
+data_path = os.path.join('data', 'train_task_2.json')
 glove_path = os.path.join('data', 'glove', 'glove.6B.300d.txt')
 
 
@@ -126,19 +126,26 @@ def process_txt(str1):
     return str1.lower()
 
 
+def process_punct(str1):
+    if len(str1) > 1:
+        str1 = str1.strip('\'s').strip('{').strip('<').strip('>').strip('//').strip('!')
+        str1 = str1.strip(',').strip(',').strip('.').strip('&').strip('\'').strip('!')
+        str1 = str1.strip('?').strip('."').strip('$').strip(')').strip('(').strip('%')
+        str1 = str1.strip('#').strip(':').strip("`")
+    return str1
+
 def process_a(freq_thr=9):
 
     train_data = json.load(open(data_path))['data']
 
     print("Calculating the frequency of each multiple choice answer...")
     ans_freqs = {}
-    for item in tqdm(train_data):
-        answers = item['dictionary']
-        for ans in answers:
-            if len(ans)==0:
-                ans=' '
-            temp_ans = process_txt(ans)
-            ans_freqs[temp_ans] = ans_freqs.get(temp_ans, 0) + 1
+    answers = train_data['dictionary']
+    for ans in answers:
+        if len(ans)==0:
+           ans=' '
+        temp_ans = process_txt(ans)
+        ans_freqs[temp_ans] = ans_freqs.get(temp_ans, 0) + 1
     
     # filter out rare answers
     for a, freq in list(ans_freqs.items()):
@@ -160,7 +167,7 @@ def process_a(freq_thr=9):
             targets.append({
                 'question_id': item['question_id'],
                 'file_path': item['file_path'].split('.')[0],
-                'answer': process_txt(ans)
+                'answer': process_punct(process_txt(ans))
             })
 
     pickle.dump([idx2ans, ans2idx], open(os.path.join('data', 'dict_ans.pkl'), 'wb'))
@@ -194,8 +201,7 @@ def process_qa(targets, max_words=14):
                 'question_id': item['question_id'],
                 'question_toked': tokens,
                 'answer': targets[counter]['answer'],
-                'answers': [process_txt(ans) for ans in item['answers']],
-                'dictionary': [process_txt(ans) for ans in item['dictionary']]
+                'answers': [process_punct(process_txt(ans)) for ans in item['answers']],
             })
             counter += 1
 
