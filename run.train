@@ -5,7 +5,7 @@ python main.py --mode "train" \
                --batch-size 256 \
                --vbatch-size 512 \
                --val-split 0.1 \
-               --epoch 100 \
+               --epoch 200 \
                --data-root data/ \
                --save log/ \
                --log-freq 11 \

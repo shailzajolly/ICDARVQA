@@ -45,6 +45,7 @@ class QuestionEncoder(nn.Module):
         outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(outputs)
         max_pool_out = F.adaptive_max_pool1d(outputs.permute(1, 2, 0), 1).squeeze()
         avg_pool_out = F.adaptive_avg_pool1d(outputs.permute(1, 2, 0), 1).squeeze()
+        avg_pool_out *=  (outputs.size(0) / q_lens).unsqueeze(1)
         cat_out = torch.cat((hidden.squeeze(), max_pool_out, avg_pool_out), dim=1)
         cat_out = self.enc_mlp(cat_out)
         ques_enc = self.do2(cat_out)
@@ -182,7 +183,7 @@ class AnswerDecoder(nn.Module):
         super(AnswerDecoder, self).__init__()
 
         self.gru = nn.GRU(hidden_size, hidden_size)
-        self.do1 = nn.Dropout(p=0.3)
+        self.do1 = nn.Dropout(p=0.4)
 
 
     def forward(self, input_step, last_hidden, mca_embed):
