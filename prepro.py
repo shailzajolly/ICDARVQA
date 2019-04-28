@@ -128,7 +128,7 @@ def process_txt(str1):
 
 def process_punct(str1):
     if len(str1) > 1:
-        str1 = str1.strip('\'s').strip('{').strip('<').strip('>').strip('//').strip('!')
+        str1 = str1.strip('\'s').strip('<').strip('>').strip('//').strip('!')
         str1 = str1.strip(',').strip(',').strip('.').strip('&').strip('\'').strip('!')
         str1 = str1.strip('?').strip('."').strip('$').strip(')').strip('(').strip('%')
         str1 = str1.strip('#').strip(':').strip("`")
@@ -137,16 +137,16 @@ def process_punct(str1):
 def process_a(freq_thr=9):
 
     train_data = json.load(open(data_path))['data']
+    task_dict = json.load(open(data_path))['dictionary'] 
 
     print("Calculating the frequency of each multiple choice answer...")
     ans_freqs = {}
-    answers = train_data['dictionary']
+    answers = task_dict
     for ans in answers:
         if len(ans)==0:
            ans=' '
         temp_ans = process_txt(ans)
         ans_freqs[temp_ans] = ans_freqs.get(temp_ans, 0) + 1
-    
     # filter out rare answers
     for a, freq in list(ans_freqs.items()):
         if freq < freq_thr:
@@ -164,10 +164,13 @@ def process_a(freq_thr=9):
     targets = []
     for item in tqdm(train_data):
         for ans in item['answers']:
+            ta = process_punct(process_txt(ans))
+            if len(ta)==0:
+                ta = process_txt(ans)
             targets.append({
                 'question_id': item['question_id'],
                 'file_path': item['file_path'].split('.')[0],
-                'answer': process_punct(process_txt(ans))
+                'answer': ta
             })
 
     pickle.dump([idx2ans, ans2idx], open(os.path.join('data', 'dict_ans.pkl'), 'wb'))
@@ -201,7 +204,7 @@ def process_qa(targets, max_words=14):
                 'question_id': item['question_id'],
                 'question_toked': tokens,
                 'answer': targets[counter]['answer'],
-                'answers': [process_punct(process_txt(ans)) for ans in item['answers']],
+                'answers': [process_punct(process_txt(ans)) if len(process_punct(process_txt(ans)))!=0 else process_txt(ans) for ans in item['answers']],
             })
             counter += 1
 
@@ -233,7 +236,7 @@ def process_wemb(idx2word, embed_type):
 
 
 if __name__ == '__main__':
-    targets, idx2ans = process_a()
+    targets, idx2ans = process_a(1)
     idx2word = process_qa(targets)
     process_wemb(idx2word, 'question')
     process_wemb(idx2ans, 'answer')
