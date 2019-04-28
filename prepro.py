@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from constants import *
 
-data_path = os.path.join('data', 'train_task_2.json')
+data_path = os.path.join('data', 'train_task_3.json')
 glove_path = os.path.join('data', 'glove', 'glove.6B.300d.txt')
 
 
@@ -137,16 +137,17 @@ def process_punct(str1):
 def process_a(freq_thr=9):
 
     train_data = json.load(open(data_path))['data']
-    task_dict = json.load(open(data_path))['dictionary'] 
 
     print("Calculating the frequency of each multiple choice answer...")
     ans_freqs = {}
-    answers = task_dict
-    for ans in answers:
-        if len(ans)==0:
-           ans=' '
-        temp_ans = process_txt(ans)
-        ans_freqs[temp_ans] = ans_freqs.get(temp_ans, 0) + 1
+    for item in train_data:
+        for ans in item['answers']:
+            ta = process_punct(process_txt(ans))
+            if len(ta) == 0:
+                ta = process_txt(ans)
+            for word in ta.split():
+                ans_freqs[word] = ans_freqs.get(word, 0) + 1
+    
     # filter out rare answers
     for a, freq in list(ans_freqs.items()):
         if freq < freq_thr:

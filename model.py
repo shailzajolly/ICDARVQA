@@ -206,6 +206,7 @@ class AnswerDecoder(nn.Module):
         """
 
         input_embed = self.embeddings(input_step).unsqueeze(0) # (1, batch_size, embed_size)
+        self.gru.flatten_parameters()
         gru_output, gru_hidden = self.gru(input_embed, last_hidden.permute(1, 0, 2)) # (1, batch_size, hidden_size), (1, batch_size, hidden_size)
         gru_output = self.do1(gru_output)
         output = self.mlp(gru_output.squeeze())
